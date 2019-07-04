@@ -339,7 +339,7 @@ lrandomkey(lua_State *L) {
 	char tmp[8];
 	int i;
 	for (i=0;i<8;i++) {
-		tmp[i] = random() & 0xff;
+		tmp[i] = rand() & 0xff;
 	}
 	lua_pushlstring(L, tmp, 8);
 	return 1;
@@ -836,10 +836,13 @@ lb64decode(lua_State *L) {
 	return 1;
 }
 
+int lhmac_sha1(lua_State *L);
+int lsha1(lua_State *L);
+
 int
 luaopen_crypt(lua_State *L) {
 	luaL_checkversion(L);
-	srandom(time(NULL));
+	srand(time(NULL));
 	luaL_Reg l[] = {
 		{ "hashkey", lhashkey },
 		{ "randomkey", lrandomkey },
@@ -852,6 +855,8 @@ luaopen_crypt(lua_State *L) {
 		{ "dhsecret", ldhsecret },
 		{ "base64encode", lb64encode },
 		{ "base64decode", lb64decode },
+		{ "sha1", lsha1},
+		{ "hmac_sha1", lhmac_sha1},
 		{ NULL, NULL },
 	};
 	luaL_newlib(L,l);

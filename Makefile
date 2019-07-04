@@ -1,2 +1,11 @@
-crypt.so : lua-crypt.c
-	gcc -g -Wall -fPIC --shared -I/usr/local/include -o $@ $^
+SRC = lsha1.c lua-crypt.c
+
+mingw: crypt.dll
+
+linux: crypt.so
+
+crypt.dll: $(SRC)
+	gcc -o $@ -Wall --shared $^ -llua
+
+crypt.so: $(SRC)
+	gcc -o $@ -Wall -fPIC --shared $^ -llua
