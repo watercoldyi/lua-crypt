@@ -9,6 +9,7 @@ option(USE_LUAJIT "使用 LuaJIT 而非 PUC Lua" ON)
 
 add_library(crypt MODULE
   lsha1.c
+  lsha256.c
   md5.c
   lmd5.c
   aes128.c
@@ -45,6 +46,11 @@ endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(crypt PRIVATE -Wall)
+endif()
+
+# Windows 下 BCryptGenRandom 需要链接 bcrypt
+if(WIN32)
+  target_link_libraries(crypt PRIVATE bcrypt)
 endif()
 
 # Lua 模块必须命名为 crypt.so；macOS 默认会给模块加 lib 前缀

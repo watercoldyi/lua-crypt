@@ -32,19 +32,19 @@ print("A B shared secret = ", crypt.hexencode(secret))
 
 assert(crypt.hexdecode(crypt.hexencode(secret)) == secret)
 
--- DES
-
-local deskey = crypt.hashkey "hello world"
-print("hashkey (hello world) = ", crypt.hexencode(deskey))
-
-local hmac = crypt.hmac64(deskey, secret)
-print("hmac(hashkey, secret) = ", crypt.hexencode(hmac))
-
-for i=1,30 do
-	local etext = crypt.desencode(deskey, string.sub("abcdefghijklmnopqrstuvwxyz1234567890",1,i))
-	local dtext = crypt.desdecode(deskey, etext)
-	print(crypt.hexencode(etext), "==>", dtext)
+-- randomkey 使用系统 CSPRNG：长度为 8，多次调用不应重复
+local seen = {}
+for _ = 1, 32 do
+	local k = crypt.randomkey()
+	assert(#k == 8)
+	seen[k] = true
 end
+local n = 0
+for _ in pairs(seen) do n = n + 1 end
+assert(n == 32)
+
+-- DES 及相关接口已移除
+assert(crypt.hashkey == nil and crypt.desencode == nil and crypt.desdecode == nil and crypt.hmac64 == nil)
 
 -- MD5
 
@@ -84,6 +84,14 @@ assert(not pcall(crypt.md5, 42))
 assert(not pcall(crypt.md5, function() return {} end))
 
 os.remove(tmppath)
+
+-- SHA-256（FIPS 180-4 测试向量）
+assert(crypt.hexencode(crypt.sha256 "") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+assert(crypt.hexencode(crypt.sha256 "abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+assert(crypt.hexencode(crypt.sha256 "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq") ==
+	"248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
+assert(crypt.hexencode(crypt.sha256(string.rep("a", 1000000))) ==
+	"cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0")
 
 -- AES
 
