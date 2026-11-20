@@ -489,7 +489,7 @@ static int
 lfromhex(lua_State *L) {
 	size_t sz = 0;
 	const char * text = luaL_checklstring(L, 1, &sz);
-	if (sz & 2) {
+	if (sz % 2) {
 		return luaL_error(L, "Invalid hex text size %d", (int)sz);
 	}
 	char tmp[SMALL_CHUNK];
@@ -838,10 +838,17 @@ lb64decode(lua_State *L) {
 
 int lhmac_sha1(lua_State *L);
 int lsha1(lua_State *L);
+int lmd5sumhex(lua_State *L);
+int lmd5file(lua_State *L);
+int laesencode(lua_State *L);
+int laesdecode(lua_State *L);
 
 int
 luaopen_crypt(lua_State *L) {
+	// luaL_checkversion 是 Lua 5.2 才引入的 API，LuaJIT 的 ABI 停留在 5.1，没有这个函数
+#if LUA_VERSION_NUM >= 502
 	luaL_checkversion(L);
+#endif
 	srand(time(NULL));
 	luaL_Reg l[] = {
 		{ "hashkey", lhashkey },
@@ -857,6 +864,10 @@ luaopen_crypt(lua_State *L) {
 		{ "base64decode", lb64decode },
 		{ "sha1", lsha1},
 		{ "hmac_sha1", lhmac_sha1},
+		{ "md5", lmd5sumhex },
+		{ "md5file", lmd5file },
+		{ "aesencode", laesencode },
+		{ "aesdecode", laesdecode },
 		{ NULL, NULL },
 	};
 	luaL_newlib(L,l);
