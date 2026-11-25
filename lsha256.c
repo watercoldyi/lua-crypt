@@ -143,3 +143,136 @@ lsha256(lua_State *L) {
 	lua_pushlstring(L, (const char *)digest, sizeof(digest));
 	return 1;
 }
+
+/*
+ * HMAC-SHA256（RFC 2104）：先按 64 字节块处理密钥，再做 ipad/opad 两层哈希。
+ * 提供流式版本，方便 HKDF 分多段喂数据。
+ */
+
+typedef struct {
+	SHA256_CTX inner;
+	SHA256_CTX outer;
+} HMAC_SHA256_CTX;
+
+static void
+hmac_sha256_init(HMAC_SHA256_CTX *ctx, const uint8_t *key, size_t keylen) {
+	uint8_t k[64];
+	size_t i;
+
+	memset(k, 0, sizeof(k));
+	if (keylen > sizeof(k)) {
+		/* 密钥超过一个块时先哈希成 32 字节 */
+		SHA256_CTX tmp;
+		uint8_t digest[32];
+		sha256_init(&tmp);
+		sha256_update(&tmp, key, keylen);
+		sha256_final(&tmp, digest);
+		memcpy(k, digest, sizeof(digest));
+	} else if (keylen > 0) {
+		memcpy(k, key, keylen);
+	}
+
+	for (i = 0; i < sizeof(k); ++i) {
+		k[i] ^= 0x36;
+	}
+	sha256_init(&ctx->inner);
+	sha256_update(&ctx->inner, k, sizeof(k));
+
+	for (i = 0; i < sizeof(k); ++i) {
+		k[i] ^= 0x36 ^ 0x5c;
+	}
+	sha256_init(&ctx->outer);
+	sha256_update(&ctx->outer, k, sizeof(k));
+}
+
+static void
+hmac_sha256_update(HMAC_SHA256_CTX *ctx, const uint8_t *data, size_t len) {
+	sha256_update(&ctx->inner, data, len);
+}
+
+static void
+hmac_sha256_final(HMAC_SHA256_CTX *ctx, uint8_t out[32]) {
+	uint8_t digest[32];
+	sha256_final(&ctx->inner, digest);
+	sha256_update(&ctx->outer, digest, sizeof(digest));
+	sha256_final(&ctx->outer, out);
+}
+
+static void
+hmac_sha256(const uint8_t *key, size_t keylen, const uint8_t *data, size_t len, uint8_t out[32]) {
+	HMAC_SHA256_CTX ctx;
+	hmac_sha256_init(&ctx, key, keylen);
+	hmac_sha256_update(&ctx, data, len);
+	hmac_sha256_final(&ctx, out);
+}
+
+/* crypt.hmac_sha256(key, data) -> 32 字节二进制 */
+int
+lhmac_sha256(lua_State *L) {
+	size_t keylen = 0, len = 0;
+	const uint8_t *key = (const uint8_t *)luaL_checklstring(L, 1, &keylen);
+	const uint8_t *data = (const uint8_t *)luaL_checklstring(L, 2, &len);
+	uint8_t out[32];
+
+	hmac_sha256(key, keylen, data, len, out);
+	lua_pushlstring(L, (const char *)out, sizeof(out));
+	return 1;
+}
+
+/* HKDF 输出上限：255 个 32 字节块 */
+#define HKDF_SHA256_MAX_OUT (255 * 32)
+
+/*
+ * crypt.hkdf_sha256(ikm, salt, info, outlen) -> outlen 字节二进制（RFC 5869）
+ * salt / info 可以传 nil，等价于空串。
+ */
+int
+lhkdf_sha256(lua_State *L) {
+	size_t ikmlen = 0, saltlen = 0, infolen = 0;
+	const uint8_t *ikm = (const uint8_t *)luaL_checklstring(L, 1, &ikmlen);
+	const char *salt = luaL_optlstring(L, 2, "", &saltlen);
+	const char *info = luaL_optlstring(L, 3, "", &infolen);
+	lua_Integer outlen = luaL_checkinteger(L, 4);
+	uint8_t prk[32], t[32];
+	uint8_t *out;
+	size_t done = 0;
+	unsigned counter = 1;
+
+	if (outlen < 0 || outlen > HKDF_SHA256_MAX_OUT) {
+		return luaL_error(L, "Invalid HKDF output length %d, need 0..%d",
+			(int)outlen, HKDF_SHA256_MAX_OUT);
+	}
+
+	/* extract：PRK = HMAC(salt, IKM) */
+	hmac_sha256((const uint8_t *)salt, saltlen, ikm, ikmlen, prk);
+
+	out = (uint8_t *)lua_newuserdata(L, outlen == 0 ? 1 : (size_t)outlen);
+
+	/* expand：T(i) = HMAC(PRK, T(i-1) || info || i) */
+	while (done < (size_t)outlen) {
+		HMAC_SHA256_CTX ctx;
+		size_t n;
+		uint8_t c = (uint8_t)counter;
+
+		hmac_sha256_init(&ctx, prk, sizeof(prk));
+		if (counter > 1) {
+			hmac_sha256_update(&ctx, t, sizeof(t));
+		}
+		if (infolen > 0) {
+			hmac_sha256_update(&ctx, (const uint8_t *)info, infolen);
+		}
+		hmac_sha256_update(&ctx, &c, 1);
+		hmac_sha256_final(&ctx, t);
+
+		n = (size_t)outlen - done;
+		if (n > sizeof(t)) {
+			n = sizeof(t);
+		}
+		memcpy(out + done, t, n);
+		done += n;
+		++counter;
+	}
+
+	lua_pushlstring(L, (const char *)out, (size_t)outlen);
+	return 1;
+}

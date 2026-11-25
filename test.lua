@@ -13,30 +13,50 @@ for i = 20, 15, -1 do
 	assert(s == crypt.base64decode(crypt.base64encode(s)))
 end
 
--- DH key exchange
+-- RFC 7748 §6.1：验证双方公钥及共享秘密
+do
+	local alice_private = crypt.hexdecode "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"
+	local bob_private = crypt.hexdecode "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb"
+	local alice_public = crypt.dhexchange(alice_private)
+	local bob_public = crypt.dhexchange(bob_private)
+	assert(crypt.hexencode(alice_public) == "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a")
+	assert(crypt.hexencode(bob_public) == "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f")
+	local expected = crypt.hexdecode "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742"
+	assert(crypt.dhsecret(bob_public, alice_private) == expected)
+	assert(crypt.dhsecret(alice_public, bob_private) == expected)
 
-local secretA = crypt.randomkey()
-local A = crypt.dhexchange(secretA)
+	-- RFC 7748 要求忽略对端公钥的最高位。
+	local high_bit = bob_public:sub(1, 31) .. string.char(bob_public:byte(32) + 128)
+	assert(crypt.dhsecret(high_bit, alice_private) == expected)
 
-print("A private secret = ", crypt.hexencode(secretA), "message->B = ", crypt.hexencode(A))
+	-- 非规范编码 p+9 应按模 p 解释，与基点 9 等价。
+	local base_point_alias = crypt.hexdecode("f6" .. string.rep("ff", 30) .. "7f")
+	assert(crypt.dhsecret(base_point_alias, alice_private) == alice_public)
 
-local secretB = crypt.randomkey()
-local B = crypt.dhexchange(secretB)
+	-- 长度正确的低阶点也必须因共享秘密全零而被拒绝。
+	assert(not pcall(crypt.dhsecret, string.rep("\0", 32), alice_private))
+	assert(not pcall(crypt.dhsecret, "\1" .. string.rep("\0", 31), alice_private))
+	for _, len in ipairs { 0, 8, 31, 33 } do
+		local wrong_length = string.rep("x", len)
+		assert(not pcall(crypt.dhexchange, wrong_length))
+		assert(not pcall(crypt.dhsecret, wrong_length, alice_private))
+		assert(not pcall(crypt.dhsecret, bob_public, wrong_length))
+	end
+	assert(not pcall(crypt.dhexchange, 42))
+end
 
-print("B private secret = ", crypt.hexencode(secretA), "message->A = ", crypt.hexencode(A))
+-- 使用系统随机源生成双方私钥，并验证一次完整握手。
+do
+	local a, b = crypt.randomkey(), crypt.randomkey()
+	local shared = crypt.dhsecret(crypt.dhexchange(b), a)
+	assert(#shared == 32 and shared == crypt.dhsecret(crypt.dhexchange(a), b))
+end
 
-local s1,s2 = crypt.dhsecret(B, secretA), crypt.dhsecret(A, secretB)
-assert(s1 == s2)
-local secret = s1
-print("A B shared secret = ", crypt.hexencode(secret))
-
-assert(crypt.hexdecode(crypt.hexencode(secret)) == secret)
-
--- randomkey 使用系统 CSPRNG：长度为 8，多次调用不应重复
+-- randomkey 使用系统 CSPRNG：长度为 32，多次调用不应重复。
 local seen = {}
 for _ = 1, 32 do
 	local k = crypt.randomkey()
-	assert(#k == 8)
+	assert(#k == 32)
 	seen[k] = true
 end
 local n = 0

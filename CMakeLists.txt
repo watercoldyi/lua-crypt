@@ -16,6 +16,8 @@ add_library(crypt MODULE
   aes256.c
   laes.c
   lua-crypt.c
+  x25519.c
+  x25519.h
   md5.h
   aes.h
   aes_variants.h)
